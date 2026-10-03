@@ -1,0 +1,35 @@
+# Render Blueprint. In the dashboard: New -> Blueprint -> pick this repo.
+#
+# The database is NOT defined here on purpose. Render's free Postgres expires
+# after 30 days, so DATABASE_URL points at a Neon instance instead (free, no
+# expiry). Paste it in when prompted.
+services:
+  - type: web
+    name: seatreservation
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /readyz
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: MAX_SEATS_PER_USER
+        value: 4
+      - key: DB_POOL_MAX
+        # Neon's free tier caps connections, and a contended seat does not
+        # benefit from a big pool anyway - the serialisation point is one row.
+        value: 10
+      - key: QUERY_TIMEOUT
+        value: 5s
+      - key: UNSAFE_MODE
+        value: 0
+      - key: ENABLE_DEV_TOKEN
+        # Left on so a reviewer can run ./scripts/verify.sh against the public
+        # URL. A real deployment would mint tokens from an identity provider
+        # and this route would not exist.
+        value: 1
+      - key: DATABASE_URL
+        sync: false # entered in the dashboard, never committed
+      - key: JWT_SECRET
+        generateValue: true

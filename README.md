@@ -234,32 +234,76 @@ The reasoning, the trade-offs, and the bugs found along the way are in
 
 ## Deploying
 
-Fly.io, because `min_machines_running = 1` keeps a machine warm — "surviving
-cold starts" is a requirement, and a free tier that scales to zero fails it by
-construction.
+Free, and set up entirely in a browser — no CLI, no card.
+
+| Piece | Service | Why |
+|---|---|---|
+| Postgres | **Neon** free tier | no expiry, and a browser SQL editor for the schema |
+| API | **Render** free tier | builds this Dockerfile straight from GitHub |
+
+Render's own free Postgres expires after 30 days, which would quietly kill the
+deployment a month after submission. Neon's does not, so the database lives
+there and Render only gets a connection string.
+
+### 1. Database — Neon
+
+1. Create a project at [neon.tech](https://neon.tech).
+2. Open the **SQL Editor**, paste the whole of [`db/schema.sql`](db/schema.sql),
+   run it.
+3. Copy the connection string. It ends in `?sslmode=require` — keep that.
+
+### 2. Service — Render
+
+**New → Blueprint**, point it at this repo, and [`render.yaml`](render.yaml)
+supplies everything except two values it asks for:
+
+- `DATABASE_URL` — the Neon string from step 1
+- `JWT_SECRET` — Render generates one
+
+Or do it by hand with **New → Web Service**: pick the repo, runtime **Docker**,
+health check path `/readyz`, then set `DATABASE_URL`, `JWT_SECRET`, and
+`ENABLE_DEV_TOKEN=1`.
+
+### 3. Verify the live instance
 
 ```bash
-# one-time
-fly auth login
-fly apps create seatlock
-fly postgres create --name seatlock-db --region bom
-fly postgres attach seatlock-db          # sets DATABASE_URL automatically
+./scripts/verify.sh https://<your-app>.onrender.com
+./burst.sh --url https://<your-app>.onrender.com \
+           $(./scripts/seed.sh 50 https://<your-app>.onrender.com) A12 500
+```
+
+Same 36/36 as local. Latency percentiles will be higher — those are real
+network round-trips — and the outcome distribution should be identical: one
+winner, zero 5xx.
+
+### Cold starts
+
+Render's free tier stops the container after ~15 minutes idle, so the first
+request after a quiet period waits 30–50s for a boot. The service is built to
+survive that rather than pretend it does not happen:
+
+- on startup the store retries Postgres for ~15s instead of crash-looping, so a
+  database that is still waking up delays readiness rather than killing the
+  process
+- `/readyz` returns 503 until Postgres actually answers, so Render holds traffic
+  until the instance can really serve it
+- `/healthz` never touches the database, so a liveness probe cannot be failed by
+  a slow database
+
+[`.github/workflows/keepwarm.yml`](.github/workflows/keepwarm.yml) pings
+`/healthz` every 10 minutes to avoid the wait entirely. Set the repo variable
+`APP_URL` to the deployed base URL to switch it on — it no-ops while unset, so
+a fork with no deployment stays green.
+
+### Fly.io instead
+
+[`fly.toml`](fly.toml) is included and configured with
+`min_machines_running = 1`, which removes cold starts altogether for a few
+dollars a month:
+
+```bash
+fly launch --no-deploy     # keep the existing fly.toml when asked
 fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
-
-# apply the schema once
-fly postgres connect -a seatlock-db < db/schema.sql
-
-# deploy
+fly postgres connect -a <db-name> < db/schema.sql
 fly deploy
 ```
-
-Then verify the live instance:
-
-```bash
-./scripts/verify.sh https://seatlock.fly.dev
-./burst.sh --url https://seatlock.fly.dev $(./scripts/seed.sh 50 https://seatlock.fly.dev) A12 500
-```
-
-The burst against a remote host runs from your machine rather than inside
-Docker, so results include real network latency — expect higher percentiles
-than the local run, and the same outcome distribution.
