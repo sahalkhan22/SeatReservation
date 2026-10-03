@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"seatlock/internal/api"
 	"seatlock/internal/config"
 	"seatlock/internal/store"
 )
@@ -39,30 +39,9 @@ func main() {
 	defer db.Close()
 	log.Info("database connected", "pool_max", cfg.DBPoolMax)
 
-	mux := http.NewServeMux()
-
-	// Liveness. Deliberately does NOT touch the database: if it did, a brief
-	// Postgres blip would make the orchestrator kill a healthy process.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-
-	// Readiness. Fails closed, so the load balancer stops sending traffic
-	// while the process stays alive long enough to recover.
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.Ping(r.Context()); err != nil {
-			log.Warn("readiness failed", "err", err)
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-				"status": "unready", "reason": "db_unavailable",
-			})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-	})
-
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           mux,
+		Handler:           api.New(cfg, db, log).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
@@ -77,18 +56,12 @@ func main() {
 
 	<-ctx.Done()
 
-	// Let in-flight requests finish. Without this, a deploy would abort
-	// transactions mid-flight and clients would see connection resets.
+	// Let in-flight requests finish. Without this a deploy aborts open
+	// transactions mid-flight and clients see connection resets.
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }

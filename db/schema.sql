@@ -18,7 +18,7 @@ CREATE TABLE reservations (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   show_id      uuid   NOT NULL REFERENCES shows(id),
   user_id      text   NOT NULL,
-  status       text   NOT NULL CHECK (status IN ('confirmed', 'cancelled')),
+  status       text   NOT NULL CHECK (status IN ('held', 'confirmed', 'cancelled')),
   amount_paise bigint NOT NULL CHECK (amount_paise >= 0),
   created_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -31,24 +31,35 @@ CREATE TABLE seats (
   status         seat_status NOT NULL DEFAULT 'available',
   reservation_id uuid REFERENCES reservations(id),
 
+  -- When a hold lapses. NULL for available and confirmed seats.
+  -- Expiry is lazy: nothing sweeps this table. The next transaction that
+  -- wants the seat reclaims it inside the same statement that grabs it, so
+  -- there is no background job to race against a confirm.
+  held_until     timestamptz,
+
   UNIQUE (show_id, label),
 
   -- A seat is owned exactly when it is not available. The database rejects
   -- any other combination, so "confirmed but ownerless" cannot be stored.
   CONSTRAINT seat_ownership_matches_status
-    CHECK ((status = 'available') = (reservation_id IS NULL))
+    CHECK ((status = 'available') = (reservation_id IS NULL)),
+
+  -- A deadline exists exactly when the seat is held.
+  CONSTRAINT seat_deadline_matches_status
+    CHECK ((status = 'held') = (held_until IS NOT NULL))
 );
 CREATE INDEX seats_show_label_idx  ON seats (show_id, label);
 CREATE INDEX seats_reservation_idx ON seats (reservation_id)
   WHERE reservation_id IS NOT NULL;
 
--- Exists to be LOCKED, not to be read as a cache.
--- Reserve takes FOR UPDATE on this row before counting, which serialises one
--- user's concurrent requests for one show while leaving other users parallel.
+-- Exists ONLY to be locked. There is no counter column on purpose: a stored
+-- count drifts (cancels, expiries, crashes), whereas a count derived under
+-- this row's lock cannot. Reserve takes FOR UPDATE here before counting, which
+-- serialises one user's concurrent requests for one show while leaving
+-- different users fully parallel.
 CREATE TABLE user_show_quota (
-  user_id     text NOT NULL,
-  show_id     uuid NOT NULL REFERENCES shows(id),
-  seats_taken int  NOT NULL DEFAULT 0 CHECK (seats_taken >= 0),
+  user_id text NOT NULL,
+  show_id uuid NOT NULL REFERENCES shows(id),
   PRIMARY KEY (user_id, show_id)
 );
 
@@ -56,9 +67,12 @@ CREATE TABLE user_show_quota (
 -- commit in the SAME transaction. They can never disagree.
 CREATE TABLE idempotency_keys (
   user_id        text NOT NULL,
+  show_id        uuid NOT NULL REFERENCES shows(id),
   key            text NOT NULL,
   seats_hash     text NOT NULL,   -- sha256 of the sorted seat labels
   reservation_id uuid NOT NULL REFERENCES reservations(id),
   created_at     timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, key)
+  -- scoped to the show: the same key on a different show is a different
+  -- request, not a replay of the first one
+  PRIMARY KEY (user_id, show_id, key)
 );
