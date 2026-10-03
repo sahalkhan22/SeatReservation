@@ -1,6 +1,6 @@
 # SeatLock
 
-**Live:** https://seatreservation-apjp.onrender.com
+**Live:** https://seatreservation-apjp.onrender.com — open it, click a seat, hit **Stampede**.
 
 A seat-reservation service built for the one moment that matters: thousands of
 people hitting the same seat in the same second.
@@ -49,6 +49,17 @@ a 500-way stampede and a reconciliation of the seat math.
 
   36 passed, 0 failed
 ```
+
+## Demo console
+
+The service serves a single-page console at `/` - seat map, click to book, a
+live invariant line, and a button that fires a hundred concurrent bookings at
+one seat. It is one HTML file embedded with `go:embed`: no framework, no build
+step, nothing added to `go.mod`.
+
+It is a demo aid, not a product UI. Browsers cap concurrent requests, so its
+stampede is near-simultaneous rather than truly simultaneous - `burst.sh`
+remains the real proof, since it releases 500 goroutines from a closed channel.
 
 > **If you change `db/schema.sql`,** run `docker compose down -v` before
 > bringing it back up. Postgres only applies the schema when its data volume is

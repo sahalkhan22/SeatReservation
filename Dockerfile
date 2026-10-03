@@ -10,7 +10,8 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api   ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/burst ./cmd/burst
 
-# Stage 2: run. No shell, no package manager, no Go toolchain. ~12MB.
+# Stage 2: run. No shell, no package manager, no Go toolchain. ~32MB for both
+# binaries, with the demo console embedded in the api one.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/api   /api
 COPY --from=build /out/burst /burst

@@ -1,0 +1,298 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeatLock — demo console</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1a1a18; --muted: #6b6b66;
+    --line: #e4e4e0; --accent: #2f6f4f;
+    --free: #e8f3ec; --free-line: #b6d9c4; --free-ink: #1f5c40;
+    --held: #fdf3dd; --held-line: #e6cf96; --held-ink: #7a5a12;
+    --sold: #f6e3e3; --sold-line: #dfb4b4; --sold-ink: #8d3030;
+    --ok: #2f6f4f; --bad: #a33; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --panel: #1c1c1a; --ink: #eceae4; --muted: #96948c;
+      --line: #2e2e2a; --accent: #7fc5a0;
+      --free: #16291f; --free-line: #2d4f3a; --free-ink: #86c9a4;
+      --held: #2b2416; --held-line: #574722; --held-ink: #d8b566;
+      --sold: #2d1b1b; --sold-line: #563434; --sold-ink: #d98b8b;
+      --ok: #7fc5a0; --bad: #e08585;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 1.45rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 1.75rem; font-size: .92rem; }
+  .sub code { font-family: var(--mono); font-size: .86em; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+  .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+
+  button {
+    font: inherit; font-size: .88rem; padding: .48rem .9rem; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { opacity: .9; color: #fff; }
+  select, input { font: inherit; font-size: .88rem; padding: .44rem .6rem; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: .4rem; margin-top: .9rem; }
+  .seat {
+    font-family: var(--mono); font-size: .8rem; padding: .55rem .2rem; text-align: center;
+    border-radius: 6px; border: 1px solid; cursor: pointer; user-select: none; transition: transform .08s;
+  }
+  .seat:active { transform: scale(.94); }
+  .seat.available { background: var(--free); border-color: var(--free-line); color: var(--free-ink); }
+  .seat.held      { background: var(--held); border-color: var(--held-line); color: var(--held-ink); }
+  .seat.confirmed { background: var(--sold); border-color: var(--sold-line); color: var(--sold-ink); cursor: not-allowed; }
+  .seat.flash { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .invariant { font-family: var(--mono); font-size: .86rem; margin-top: .9rem; color: var(--muted); }
+  .invariant b { color: var(--ink); font-weight: 600; }
+  .verdict.ok  { color: var(--ok); font-weight: 700; }
+  .verdict.bad { color: var(--bad); font-weight: 700; }
+
+  .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .82rem; color: var(--muted); margin-top: .8rem; }
+  .legend span { display: flex; align-items: center; gap: .35rem; }
+  .dot { width: 11px; height: 11px; border-radius: 3px; border: 1px solid; display: inline-block; }
+
+  #log { font-family: var(--mono); font-size: .78rem; max-height: 230px; overflow-y: auto; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  #log div { padding: .18rem 0; border-bottom: 1px solid var(--line); }
+  #log div:last-child { border-bottom: 0; }
+  .c201, .c200 { color: var(--ok); }
+  .c409, .c400, .c401, .c403, .c404 { color: #b5861f; }
+  .c500, .c503, .c0 { color: var(--bad); }
+
+  table { border-collapse: collapse; font-family: var(--mono); font-size: .82rem; width: 100%; margin-top: .3rem; }
+  td { padding: .28rem .5rem .28rem 0; }
+  td:last-child { text-align: right; color: var(--muted); }
+  h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 .7rem; font-weight: 600; }
+  .note { font-size: .82rem; color: var(--muted); margin: .7rem 0 0; }
+  a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <h1>SeatLock</h1>
+  <p class="sub">
+    Demo console for the reservation API. Every click below is a real HTTP request —
+    watch the log. The source of truth is Postgres; this page holds no state.
+  </p>
+
+  <div class="panel">
+    <div class="row">
+      <button class="primary" id="newShow">New show</button>
+      <select id="size">
+        <option value="24">24 seats</option>
+        <option value="48" selected>48 seats</option>
+        <option value="100">100 seats</option>
+      </select>
+      <span style="flex:1"></span>
+      <select id="burstN">
+        <option value="50">50 buyers</option>
+        <option value="100" selected>100 buyers</option>
+        <option value="200">200 buyers</option>
+      </select>
+      <button id="stampede" disabled>Stampede one seat</button>
+    </div>
+    <p class="note" id="showline">No show yet — click <b>New show</b>.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Seat map</h2>
+    <div class="grid" id="grid"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--free);border-color:var(--free-line)"></i> available — click to book</span>
+      <span><i class="dot" style="background:var(--held);border-color:var(--held-line)"></i> held</span>
+      <span><i class="dot" style="background:var(--sold);border-color:var(--sold-line)"></i> confirmed</span>
+    </div>
+    <div class="invariant" id="invariant"></div>
+  </div>
+
+  <div class="panel" id="resultPanel" style="display:none">
+    <h2>Stampede result</h2>
+    <table id="results"></table>
+    <div class="invariant" id="burstVerdict"></div>
+    <p class="note">
+      Browsers cap concurrent requests, so these are near-simultaneous rather than
+      truly simultaneous. The real proof is <code>burst.sh</code>, which fires 500
+      goroutines released by a closed channel — see the README.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>Request log</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let showId = null, tokens = {}, seatLabels = [];
+
+function log(method, path, code, extra) {
+  const el = document.createElement('div');
+  el.className = 'c' + code;
+  el.textContent = `${code}  ${method} ${path}${extra ? '  ' + extra : ''}`;
+  $('#log').prepend(el);
+  while ($('#log').children.length > 60) $('#log').lastChild.remove();
+}
+
+async function token(user, admin) {
+  const key = user + (admin ? ':admin' : '');
+  if (tokens[key]) return tokens[key];
+  const r = await fetch(`/dev/token?user_id=${encodeURIComponent(user)}${admin ? '&admin=1' : ''}`, { method: 'POST' });
+  if (!r.ok) throw new Error('dev token endpoint is disabled on this deployment');
+  tokens[key] = (await r.json()).token;
+  return tokens[key];
+}
+
+async function api(method, path, body, tok) {
+  const r = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  return { code: r.status, data };
+}
+
+async function newShow() {
+  $('#newShow').disabled = true;
+  try {
+    const n = +$('#size').value;
+    seatLabels = Array.from({ length: n }, (_, i) => 'A' + (i + 1));
+    const admin = await token('admin', true);
+    const { code, data } = await api('POST', '/shows',
+      { name: 'demo', seats: seatLabels, price_paise: 25000 }, admin);
+    log('POST', '/shows', code, `${n} seats`);
+    if (code !== 201) return;
+    showId = data.show_id;
+    history.replaceState(null, '', '?show=' + showId);
+    $('#showline').innerHTML = `show <code>${showId}</code> · &#8377;250.00 per seat · limit 4 per user`;
+    $('#stampede').disabled = false;
+    $('#resultPanel').style.display = 'none';
+    await refresh();
+  } catch (e) {
+    $('#showline').textContent = e.message;
+  } finally {
+    $('#newShow').disabled = false;
+  }
+}
+
+async function refresh() {
+  if (!showId) return;
+  const r = await fetch('/shows/' + showId);
+  if (!r.ok) return;
+  const s = await r.json();
+  render(s);
+}
+
+function render(state) {
+  const grid = $('#grid');
+  grid.innerHTML = '';
+  for (const label of seatLabels) {
+    const status = state.seats[label] || 'available';
+    const el = document.createElement('div');
+    el.className = 'seat ' + status;
+    el.textContent = label;
+    el.title = status;
+    if (status === 'available') el.onclick = () => book(label, el);
+    grid.appendChild(el);
+  }
+  const m = state.summary, sum = m.available + m.held + m.confirmed;
+  const ok = sum === m.total;
+  $('#invariant').innerHTML =
+    `available <b>${m.available}</b> + held <b>${m.held}</b> + confirmed <b>${m.confirmed}</b> ` +
+    `= <b>${sum}</b> / total <b>${m.total}</b> ` +
+    `<span class="verdict ${ok ? 'ok' : 'bad'}">${ok ? 'BALANCED' : 'VIOLATED'}</span>`;
+}
+
+let buyer = 0;
+async function book(label, el) {
+  el.classList.add('flash');
+  const user = 'guest_' + (++buyer);
+  const tok = await token(user);
+  const { code, data } = await api('POST', `/shows/${showId}/reserve`,
+    { seats: [label], idempotency_key: `ui-${Date.now()}-${label}` }, tok);
+  log('POST', `/shows/{id}/reserve ${label}`, code, code === 201 ? `as ${user}` : data.error || '');
+  await refresh();
+}
+
+async function stampede() {
+  const btn = $('#stampede');
+  btn.disabled = true; btn.textContent = 'minting tokens...';
+  try {
+    const n = +$('#burstN').value;
+    const free = [...$('#grid').querySelectorAll('.seat.available')].map(e => e.textContent);
+    if (!free.length) { alert('no free seats — make a new show'); return; }
+    const target = free[Math.floor(free.length / 2)];
+
+    // Minted up front: doing it inside the burst would stagger the start.
+    const toks = await Promise.all(
+      Array.from({ length: n }, (_, i) => token('rush_' + Date.now() + '_' + i)));
+
+    btn.textContent = `${n} buyers on ${target}...`;
+    const stamp = Date.now();
+    const t0 = performance.now();
+    const results = await Promise.all(toks.map((tk, i) =>
+      api('POST', `/shows/${showId}/reserve`,
+          { seats: [target], idempotency_key: `rush-${stamp}-${i}` }, tk)
+        .catch(() => ({ code: 0, data: { error: 'transport_error' } }))));
+    const ms = Math.round(performance.now() - t0);
+
+    const tally = {};
+    let won = 0, fail = 0;
+    for (const r of results) {
+      const key = `${r.code} ${r.code < 300 ? 'confirmed' : (r.data.error || '')}`;
+      tally[key] = (tally[key] || 0) + 1;
+      if (r.code === 201) won++;
+      if (r.code >= 500 || r.code === 0) fail++;
+    }
+
+    $('#results').innerHTML = Object.entries(tally).sort()
+      .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')
+      + `<tr><td>5xx / transport failures</td><td>${fail}</td></tr>`
+      + `<tr><td>wall time</td><td>${ms} ms</td></tr>`;
+
+    await refresh();
+    const after = await (await fetch('/shows/' + showId)).json();
+    const noDouble = won === 1, noFail = fail === 0;
+    $('#burstVerdict').innerHTML =
+      `<span class="verdict ${noDouble ? 'ok' : 'bad'}">${won} winner${won === 1 ? '' : 's'}</span> ` +
+      `out of ${n} for seat ${target} &nbsp;·&nbsp; ` +
+      `<span class="verdict ${noFail ? 'ok' : 'bad'}">${fail} server errors</span> &nbsp;·&nbsp; ` +
+      `confirmed seats now <b>${after.summary.confirmed}</b>`;
+    $('#resultPanel').style.display = '';
+    log('BURST', `${n} requests on ${target}`, won === 1 ? 201 : 500, `${ms}ms`);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Stampede one seat';
+  }
+}
+
+$('#newShow').onclick = newShow;
+$('#stampede').onclick = stampede;
+
+// Resume a show from ?show=<id> so the page can be shared mid-demo.
+(async () => {
+  const id = new URLSearchParams(location.search).get('show');
+  if (!id) return;
+  const r = await fetch('/shows/' + id);
+  if (!r.ok) return;
+  const s = await r.json();
+  showId = id;
+  seatLabels = Object.keys(s.seats).sort((a, b) => +a.slice(1) - +b.slice(1));
+  $('#showline').innerHTML = `show <code>${id}</code> · &#8377;250.00 per seat · limit 4 per user`;
+  $('#stampede').disabled = false;
+  render(s);
+})();
+
+setInterval(refresh, 4000);
+</script>

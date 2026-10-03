@@ -31,6 +31,9 @@ func (s *Server) Routes() http.Handler {
 
 	mux.Handle("GET /metrics", metrics.Handler())
 
+	// {$} anchors to the root exactly; a bare "GET /" would catch everything.
+	mux.HandleFunc("GET /{$}", s.serveConsole)
+
 	s.route(mux, "POST /shows", s.requireAdmin(s.createShow))
 	s.route(mux, "GET /shows/{id}", s.getShow)
 	s.route(mux, "POST /shows/{id}/reserve", s.authenticate(s.reserve))
