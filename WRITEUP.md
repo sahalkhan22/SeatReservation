@@ -296,9 +296,32 @@ Each of these was live at some point and is now covered by a test.
 ## 10. Limits, honestly
 
 **One hot seat serialises.** A seat is a row; concurrent buyers queue on its
-lock. Measured on a laptop: 500 simultaneous requests for one seat resolve in
-~320ms wall, p99 ~320ms, ~1,500 req/s, zero failures. Different seats scale
-linearly — the contention is per-row, not global.
+lock. Different seats scale linearly — the contention is per-row, not global.
+
+Three runs of the same 500-way stampede, which together say more than any one
+of them does:
+
+| Setup | Outcome | p99 | Throughput |
+|---|---|---|---|
+| App + Postgres both local | 1 win, 499 declined, 0 failures | 320ms | 1,530 req/s |
+| App local, database in Singapore | 1 win, 61 declined, **265 × 503** | 5.0s | 99 req/s |
+| App + database both in Singapore (deployed) | 1 win, 499 declined, 0 failures | 5.5s | 91 req/s |
+
+Row two is the instructive one. A booking makes roughly nine database round
+trips; at ~70ms each that is ~600ms per booking, so a 10-connection pool clears
+about sixteen per second and 500 concurrent requests cannot finish inside the
+5s query deadline. They queue, hit it, and return 503.
+
+Nothing about the locking changed between rows two and three — only the
+distance to the database. **The design was never the bottleneck; the network
+path was.** That is also why the fix for row two would not have been a larger
+pool or a longer timeout. It would have been collapsing those nine round trips,
+several of which could fold into the statements around them.
+
+Row three still shows a 5.5s p99 at 91 req/s. That is the free tier: 0.1 CPU
+and 512MB for the service, plus a real ~70ms hop from the load generator in
+India to the service in Singapore. Zero failures and exactly one winner is what
+the requirement asks for, but these are not numbers worth quoting as a ceiling.
 
 If one seat genuinely needed more, the fix would be to shard it into a token
 pool and hand out claims. That trades exactness for throughput, and for
