@@ -53,6 +53,7 @@
   .seat.available { background: var(--free); border-color: var(--free-line); color: var(--free-ink); }
   .seat.held      { background: var(--held); border-color: var(--held-line); color: var(--held-ink); }
   .seat.confirmed { background: var(--sold); border-color: var(--sold-line); color: var(--sold-ink); cursor: not-allowed; }
+  .seat.owned { cursor: pointer; border-style: dashed; border-width: 1.5px; }
   .seat.flash { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   .invariant { font-family: var(--mono); font-size: .86rem; margin-top: .9rem; color: var(--muted); }
@@ -112,6 +113,7 @@
       <span><i class="dot" style="background:var(--free);border-color:var(--free-line)"></i> available — click to book</span>
       <span><i class="dot" style="background:var(--held);border-color:var(--held-line)"></i> held</span>
       <span><i class="dot" style="background:var(--sold);border-color:var(--sold-line)"></i> confirmed</span>
+      <span><i class="dot" style="background:var(--sold);border-color:var(--sold-line);border-style:dashed"></i> yours &mdash; click to cancel</span>
     </div>
     <div class="invariant" id="invariant"></div>
   </div>
@@ -136,6 +138,12 @@
 <script>
 const $ = s => document.querySelector(s);
 let showId = null, tokens = {}, seatLabels = [];
+
+// Seats booked in THIS browser session, so they can be cancelled by clicking
+// again. Anything booked by the stampede (or by someone else) is not in here
+// and stays uncancellable - which is the API's rule, not the page's: cancel
+// requires the owner's token.
+let mine = {};
 
 function log(method, path, code, extra) {
   const el = document.createElement('div');
@@ -175,6 +183,7 @@ async function newShow() {
     log('POST', '/shows', code, `${n} seats`);
     if (code !== 201) return;
     showId = data.show_id;
+    mine = {};
     history.replaceState(null, '', '?show=' + showId);
     $('#showline').innerHTML = `show <code>${showId}</code> · &#8377;250.00 per seat · limit 4 per user`;
     $('#stampede').disabled = false;
@@ -203,8 +212,16 @@ function render(state) {
     const el = document.createElement('div');
     el.className = 'seat ' + status;
     el.textContent = label;
-    el.title = status;
-    if (status === 'available') el.onclick = () => book(label, el);
+    if (status === 'available') {
+      el.title = 'available — click to book';
+      el.onclick = () => book(label, el);
+    } else if (mine[label]) {
+      el.title = 'you booked this — click to cancel';
+      el.classList.add('owned');
+      el.onclick = () => release(label, el);
+    } else {
+      el.title = status + ' — booked by someone else, so you cannot cancel it';
+    }
     grid.appendChild(el);
   }
   const m = state.summary, sum = m.available + m.held + m.confirmed;
@@ -223,6 +240,17 @@ async function book(label, el) {
   const { code, data } = await api('POST', `/shows/${showId}/reserve`,
     { seats: [label], idempotency_key: `ui-${Date.now()}-${label}` }, tok);
   log('POST', `/shows/{id}/reserve ${label}`, code, code === 201 ? `as ${user}` : data.error || '');
+  if (code === 201) mine[label] = { id: data.reservation_id, tok, user };
+  await refresh();
+}
+
+async function release(label, el) {
+  el.classList.add('flash');
+  const own = mine[label];
+  const { code, data } = await api('POST', `/reservations/${own.id}/cancel`, null, own.tok);
+  log('POST', `/reservations/{id}/cancel ${label}`, code,
+      code === 200 ? `released by ${own.user}` : data.error || '');
+  if (code === 200) delete mine[label];
   await refresh();
 }
 
