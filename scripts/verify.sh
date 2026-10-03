@@ -151,7 +151,13 @@ echo "------------------------------------------------------------"
 echo "  500-way stampede on a single seat"
 echo "------------------------------------------------------------"
 STAMPEDE_SHOW=$("$(dirname "$0")/seed.sh" 50 "$BASE")
-if "$(dirname "$0")/../burst.sh" "$STAMPEDE_SHOW" A12 500 2>&1 | tail -14; then
+
+# Without --url, burst.sh runs inside the docker network and would hammer the
+# LOCAL stack while the rest of this script checked a remote one.
+BURST_ARGS=()
+[[ "$BASE" != "http://localhost:8080" ]] && BURST_ARGS=(--url "$BASE")
+
+if "$(dirname "$0")/../burst.sh" "${BURST_ARGS[@]}" "$STAMPEDE_SHOW" A12 500 2>&1 | tail -14; then
   green "stampede: one winner, no double-sell, invariant intact"
 else
   red "stampede" "all checks pass" "see output above"
