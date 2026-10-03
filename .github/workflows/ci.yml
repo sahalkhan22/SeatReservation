@@ -1,0 +1,53 @@
+# Proof of portability: this runs from a bare clone on a machine that has
+# nothing installed. If it is green, `git clone && docker compose up` works.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: seatlock
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: seatlock
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U seatlock -d seatlock"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://seatlock:devpassword@localhost:5432/seatlock?sslmode=disable
+      JWT_SECRET: ci-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: apply schema
+        run: psql "$DATABASE_URL" -f db/schema.sql
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t seatlock:ci .
+      - name: compose boots and answers /readyz
+        run: |
+          cp .env.example .env
+          docker compose up -d --build
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:8080/readyz; then echo " OK"; exit 0; fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1

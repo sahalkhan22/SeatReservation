@@ -1,0 +1,46 @@
+# One command on any machine with Docker:  docker compose up --build
+# Neither Go nor Postgres needs to be installed on the host.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: seatlock
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: seatlock
+    volumes:
+      # schema.sql runs automatically the FIRST time this volume is empty.
+      # Changed the schema? `docker compose down -v` to force a re-init.
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seatlock -d seatlock"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  api:
+    build: .
+    environment:
+      PORT: 8080
+      # hostname "postgres" resolves on the compose network - not localhost
+      DATABASE_URL: postgres://seatlock:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/seatlock?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      MAX_SEATS_PER_USER: ${MAX_SEATS_PER_USER:-4}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      QUERY_TIMEOUT: ${QUERY_TIMEOUT:-2s}
+      ENABLE_DEV_TOKEN: ${ENABLE_DEV_TOKEN:-1}
+      UNSAFE_MODE: ${UNSAFE_MODE:-0}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        # waits for pg_isready, not just "container started"
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

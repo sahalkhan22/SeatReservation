@@ -1,0 +1,19 @@
+# secrets: .env is local-only, .env.example is committed
+.env
+.env.local
+
+# build output
+/bin/
+/out/
+seatlock
+*.exe
+
+# go test artifacts
+*.test
+coverage.out
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

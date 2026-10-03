@@ -1,0 +1,7 @@
+# Force LF inside containers. Without this, a Windows checkout gives shell
+# scripts CRLF endings and Linux containers fail with "bad interpreter".
+* text=auto eol=lf
+*.sh  text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
