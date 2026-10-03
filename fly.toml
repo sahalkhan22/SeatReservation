@@ -1,0 +1,39 @@
+app = "seatlock"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  MAX_SEATS_PER_USER = "4"
+  DB_POOL_MAX = "20"
+  QUERY_TIMEOUT = "2s"
+  UNSAFE_MODE = "0"
+
+  # Left on so a reviewer can run ./scripts/verify.sh against the public URL.
+  # This is a demo deployment with no user store; a real one would mint tokens
+  # from an identity provider and this route would not exist.
+  ENABLE_DEV_TOKEN = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+
+  # Deliberately NOT auto-stopping. A machine that scales to zero takes tens of
+  # seconds to answer its first request, and "survives cold starts" is a
+  # requirement here. One always-on machine costs a few dollars a month.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/readyz"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -229,3 +229,37 @@ as many API replicas as you like.
 
 The reasoning, the trade-offs, and the bugs found along the way are in
 [WRITEUP.md](WRITEUP.md).
+
+---
+
+## Deploying
+
+Fly.io, because `min_machines_running = 1` keeps a machine warm — "surviving
+cold starts" is a requirement, and a free tier that scales to zero fails it by
+construction.
+
+```bash
+# one-time
+fly auth login
+fly apps create seatlock
+fly postgres create --name seatlock-db --region bom
+fly postgres attach seatlock-db          # sets DATABASE_URL automatically
+fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
+
+# apply the schema once
+fly postgres connect -a seatlock-db < db/schema.sql
+
+# deploy
+fly deploy
+```
+
+Then verify the live instance:
+
+```bash
+./scripts/verify.sh https://seatlock.fly.dev
+./burst.sh --url https://seatlock.fly.dev $(./scripts/seed.sh 50 https://seatlock.fly.dev) A12 500
+```
+
+The burst against a remote host runs from your machine rather than inside
+Docker, so results include real network latency — expect higher percentiles
+than the local run, and the same outcome distribution.
