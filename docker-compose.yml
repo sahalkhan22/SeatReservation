@@ -42,5 +42,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Load generator. Runs INSIDE the docker network so it reaches the API
+  # directly over the bridge, bypassing the host port proxy - on Windows that
+  # proxy refuses connections once a few hundred arrive at the same instant,
+  # which looks like a service failure but never reaches the service.
+  # Not started by `docker compose up`; invoked via ./burst.sh.
+  burst:
+    build: .
+    entrypoint: ["/burst"]
+    profiles: ["tools"]
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   pgdata:
